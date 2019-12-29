@@ -1,10 +1,23 @@
 (ns myweb.core
-  (:require [ring.adapter.jetty :as jetty]))
+  (:require [ring.adapter.jetty :as jetty]
+            [ring.middleware.params :refer [wrap-params]]))
 
 (defn myapp [request]
-  {:body "Hello World"
-   :status 200
-   :headers {"Content-Type" "text/html"}})
+  (str "Hello, " (get (:params request) "name")))
+
+(defn string-response-middleware [handler]
+  (fn [request]
+    (let [response (handler request)]
+      (if (instance? String response)
+        {:body response
+         :status 200
+         :headers {"Content-Type" "text/html"}}
+        response))))
+
+(def handler
+  (-> myapp
+      string-response-middleware
+      wrap-params))
 
 (defn -main []
-  (jetty/run-jetty myapp {:port 3030}))
+  (jetty/run-jetty handler {:port 3030}))
