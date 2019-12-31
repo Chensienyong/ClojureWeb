@@ -1,23 +1,43 @@
 (ns myweb.core
-  (:require [ring.adapter.jetty :as jetty]
-            [ring.middleware.params :refer [wrap-params]]))
+  (:require [net.cgrand.enlive-html :as enlive]
+            [compojure.core :refer [defroutes GET POST]]
+            [ring.adapter.jetty :as jetty]))
 
-(defn myapp [request]
-  (str "Hello, " (get (:params request) "name")))
+(defrecord Tweed [title content])
 
-(defn string-response-middleware [handler]
-  (fn [request]
-    (let [response (handler request)]
-      (if (instance? String response)
-        {:body response
-         :status 200
-         :headers {"Content-Type" "text/html"}}
-        response))))
+(defprotocol TweedStore
+  (get-tweeds [store])
+  (put-tweed! [store tweed]))
 
-(def handler
-  (-> myapp
-      string-response-middleware
-      wrap-params))
+(defrecord AtomStore [data])
 
-(defn -main []
-  (jetty/run-jetty handler {:port 3030}))
+(extend-protocol TweedStore
+   AtomStore
+   (get-tweeds [store]
+      (get @(:data store) :tweeds))
+   (put-tweed! [store tweed]
+      (swap! (:data store)
+             update-in [:tweeds] conj tweed)))
+
+(def store (->AtomStore (atom {:tweeds '()})))
+
+(get-tweeds store)
+(put-tweed! store (->Tweed "Test Title" "Test Content"))
+(put-tweed! store (->Tweed "Test Title2" "Test Content"))
+
+(enlive/defsnippet tweed-tpl "tweedler/index.html" [[:article.tweed enlive/first-of-type]]
+  [tweed]
+  [:.title] (enlive/html-content (:title tweed))
+  [:.content] (enlive/html-content (:content tweed)))
+
+(enlive/deftemplate index-tpl "tweedler/index.html"
+  [tweeds]
+  [:section.tweeds] (enlive/content (map tweed-tpl tweeds)))
+
+(index-tpl (get-tweeds store))
+
+(defroutes app
+  (GET "/" [] (index-tpl (get-tweeds store)))
+  (POST "/" req "TODO"))
+
+(def server (jetty/run-jetty #'app {:port 3030 :join? false}))
