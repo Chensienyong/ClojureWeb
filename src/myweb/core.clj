@@ -1,7 +1,11 @@
 (ns myweb.core
   (:require [net.cgrand.enlive-html :as enlive]
             [compojure.core :refer [defroutes GET POST]]
-            [ring.adapter.jetty :as jetty]))
+            [compojure.route :refer [resources]]
+            [ring.adapter.jetty :as jetty]
+            [ring.middleware.params :refer [wrap-params]]
+            [markdown.core :refer [md-to-html-string]]
+            [clojure.string :refer [escape]]))
 
 (defrecord Tweed [title content])
 
@@ -22,22 +26,34 @@
 (def store (->AtomStore (atom {:tweeds '()})))
 
 (get-tweeds store)
-(put-tweed! store (->Tweed "Test Title" "Test Content"))
-(put-tweed! store (->Tweed "Test Title2" "Test Content"))
+(put-tweed! store (->Tweed "Test Title3" "Test Content"))
 
 (enlive/defsnippet tweed-tpl "tweedler/index.html" [[:article.tweed enlive/first-of-type]]
   [tweed]
   [:.title] (enlive/html-content (:title tweed))
-  [:.content] (enlive/html-content (:content tweed)))
+  [:.content] (enlive/html-content (md-to-html-string(:content tweed))))
 
 (enlive/deftemplate index-tpl "tweedler/index.html"
   [tweeds]
-  [:section.tweeds] (enlive/content (map tweed-tpl tweeds)))
+  [:section.tweeds] (enlive/content (map tweed-tpl tweeds))
+  [:form] (enlive/set-attr :method "post" :action "/"))
 
 (index-tpl (get-tweeds store))
 
-(defroutes app
+(defn escape-html [s]
+  (escape s {\> "&gt;" \< "&lt;"}))
+
+(defn handle-create [{{title "title" content "content"} :params}]
+  (put-tweed! store (->Tweed (escape-html title) (escape-html content)))
+  {:body "" :status 302 :headers {"Location" "/"}})
+
+(defroutes app-routes
   (GET "/" [] (index-tpl (get-tweeds store)))
-  (POST "/" req "TODO"))
+  (POST "/" req (handle-create req))
+  (resources "/css" {:root "tweedler/css"})
+  (resources "/img" {:root "tweedler/img"}))
+
+(def app (-> app-routes
+             (wrap-params)))
 
 (def server (jetty/run-jetty #'app {:port 3030 :join? false}))
